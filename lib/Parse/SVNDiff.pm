@@ -1,5 +1,5 @@
 package Parse::SVNDiff;
-$Parse::SVNDiff::VERSION = '0.01';
+$Parse::SVNDiff::VERSION = '0.02';
 
 use 5.008;
 use bytes;
@@ -43,7 +43,7 @@ sub parse {
     my $self = shift;
 
     my $fh;
-    if ( UNIVERSAL::isa($_[0] => 'GLOB') ) {
+    if (UNIVERSAL::isa($_[0] => 'GLOB')) {
         $fh = $_[0];
     }
     else {
@@ -63,25 +63,22 @@ sub parse {
 sub dump {
     my $self = shift;
 
-    "SVN\0" . join '',  map {
+    "SVN\0" . join '', map {
         my $inst_dump = $self->dump_instructions($_->{instructions});
-        pack(
-            'w w w w w',
+        pack('w w w w w',
             @{$_}{qw( source_offset source_length target_length )},
-            length($inst_dump),
-            length($_->{new_data}),
+            length($inst_dump), length($_->{new_data}),
         ),
-        $inst_dump,
-        $_->{new_data},
+        $inst_dump, $_->{new_data},
     } @$self;
 }
 
 sub dump_instructions {
-    my $self = shift;
+    my $self         = shift;
     my $instructions = shift;
-    my $dump = '';
+    my $dump         = '';
 
-    foreach my $inst (@{ $instructions }) {
+    foreach my $inst (@{$instructions}) {
         if ($inst->{length} >= 0b01000000) {
             $dump .= chr($inst->{selector} << 6) . pack('w', $inst->{length});
         }
@@ -89,7 +86,8 @@ sub dump_instructions {
             $dump .= chr(($inst->{selector} << 6) + $inst->{length});
         }
 
-        $dump .= pack('w', $inst->{offset}) if $inst->{selector} != SELECTOR_NEW;
+        next if $inst->{selector} == SELECTOR_NEW;
+        $dump .= pack('w', $inst->{offset});
     }
 
     return $dump;
@@ -98,7 +96,7 @@ sub dump_instructions {
 sub parse_window {
     my $self = shift;
     my $fh   = shift;
-    
+
     my $source_offset = $self->parse_ber($fh);
     my $source_length = $self->parse_ber($fh);
     my $target_length = $self->parse_ber($fh);
@@ -112,11 +110,11 @@ sub parse_window {
     my $new_data = <$fh>;
 
     push @$self, {
-        source_offset   => $source_offset,
-        source_length   => $source_length,
-        target_length   => $target_length,
-        new_data        => $new_data,
-        instructions    => $instructions,
+        source_offset => $source_offset,
+        source_length => $source_length,
+        target_length => $target_length,
+        new_data      => $new_data,
+        instructions  => $instructions,
     };
 }
 
@@ -133,10 +131,10 @@ sub parse_instructions {
         my $selector = ord($_) >> 6;
         my $length   = (ord($_) % 0b01000000) || $self->parse_ber($fh);
 
-        push @instructions, {
+        push @instructions, { 
             selector => $selector,
             length   => $length,
-            offset   => ( ($selector == 0b10) ? 0 : $self->parse_ber($fh) ),
+            offset   => (($selector == 0b10) ? 0 : $self->parse_ber($fh)),
         };
 
         last if (tell($fh) - $pos) >= $len;
@@ -160,37 +158,32 @@ sub parse_ber {
 }
 
 sub apply {
-    my $self = shift;
+    my $self   = shift;
     my $target = '';
 
     foreach my $window (@$self) {
-        my $data_offset = 0;
+        my $data_offset   = 0;
         my $target_offset = length($target);
         my $source_offset = $window->{source_offset};
         foreach my $inst (@{ $window->{instructions} }) {
             if ($inst->{selector} == SELECTOR_SOURCE) {
                 $target .= substr(
-                    $_[0],
-                    ($source_offset + $inst->{offset}),
-                    $inst->{length}
+                    $_[0], ($source_offset + $inst->{offset}), $inst->{length}
                 );
             }
             elsif ($inst->{selector} == SELECTOR_TARGET) {
-                my $offset = ($target_offset + $inst->{offset});
-                my $overflow = ( $inst->{length} - ( length($target) - $offset ) );
+                my $offset   = ($target_offset + $inst->{offset});
+                my $overflow = ($inst->{length} - (length($target) - $offset));
 
                 if ($overflow <= 0) {
-                    $target .= substr(
-                        $target,
-                        ($target_offset + $inst->{offset}),
-                        $inst->{length}
-                    );
+                    $target .= substr($target, $offset, $inst->{length});
                 }
                 else {
-                    my $chunk = substr($target, $offset);
+                    my $chunk = 
                     $target .= substr(
-                        ($chunk x (int( $overflow / length($chunk) ) + 1)),
-                        0, $inst->{length},
+                        substr($target, $offset) x (
+                            int($overflow / (length($target) - $offset)) + 1
+                        ), 0, $inst->{length}
                     );
                 }
             }
@@ -224,3 +217,4 @@ under the same terms as Perl itself.
 See L<http://www.perl.com/perl/misc/Artistic.html>
 
 =cut
+

@@ -1,5 +1,5 @@
 name: Parse-SVNDiff
-version: 0.01
+version: 0.02
 abstract: Subversion binary diff format parser
 author: Autrijus Tang <autrijus@autrijus.org>
 license: perl
