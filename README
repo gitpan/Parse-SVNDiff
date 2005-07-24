@@ -1,5 +1,8 @@
 This is the README file for Parse::SVNDiff, a parser for Subversion's
-binary diff format.  It requires Perl version 5.8 or later.
+binary diff format.  It requires Perl version 5.8 or later, as well as
+Data::Lazy 0.06, and the Class::Tangram accessors package.
+
+Running the test suite will require Test::Base 0.43
 
 * Installation
 
@@ -12,6 +15,10 @@ make test
 make install
 
 * Copyright
+
+Copyright 2005 by Sam Vilain <samv@cpan.org>
+
+Original version:
 
 Copyright 2004 by Autrijus Tang <autrijus@autrijus.org>.
 

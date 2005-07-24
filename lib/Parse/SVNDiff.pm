@@ -1,14 +1,16 @@
 package Parse::SVNDiff;
-$Parse::SVNDiff::VERSION = '0.02';
+$Parse::SVNDiff::VERSION = '0.03';
 
 use 5.008;
+
+use base qw(Class::Tangram);
+
+use Parse::SVNDiff::Window;
+
 use bytes;
 use strict;
 use warnings;
 
-use constant SELECTOR_SOURCE => 0b00;
-use constant SELECTOR_TARGET => 0b01;
-use constant SELECTOR_NEW    => 0b10;
 
 =head1 NAME
 
@@ -16,28 +18,83 @@ Parse::SVNDiff - Subversion binary diff format parser
 
 =head1 VERSION
 
-This document describes version 0.01 of Parse::SVNDiff, released
-November 6, 2004.
+This document describes version 0.03 of Parse::SVNDiff, released
+July 24, 2005.
 
 =head1 SYNOPSIS
 
     use Parse::SVNDiff;
     $diff = Parse::SVNDiff->new;
     $diff->parse($raw_svndiff);
-    $target_text = $diff->apply($source_text);
     $raw_svndiff = $diff->dump;
+    $target_text = $diff->apply($source_text);
+
+    $diff->apply_fh($source_fh, $target_fh);
 
 =head1 DESCRIPTION
 
-This module implements a parser and a dumper for Subversion's I<svndiff> binary
-diff format.  The API is still subject to change in the next few versions.
+This module implements a parser and a dumper for Subversion's
+I<svndiff> binary diff format.  The API is still subject to change in
+the next few versions.
+
+=head2 Lazy Diffs
+
+If you pass the lazy option to the constructor;
+
+  $diff = Parse::SVNDiff->new( lazy => 1 );
+
+Then the module does not actually parse the diff until you either dump
+it or apply it to something.
+
+Note that Lazy Diffs are so lazy that they also forget their contents
+after a C<apply> or C<dump> so can't be applied twice.  This is under
+the assumption that if you're doing it lazy, you're probably only
+going to want to do one of those.
+
+You can also make individual data windows lazy load parts of
+themselves; it remains to be seen whether this will see a new
+performance improvement or degradation.  The option is;
+
+  $diff = Parse::SVNDiff->new( lazy => 1,
+                               lazy_windows => 1,
+                             );
+
+Currently you can't use C<lazy_windows> unless the input stream to
+C<-E<gt>parse()> is seekable.
+
+=head2 Bitches at the SVN Diff binary format
+
+Each window specifies a "source" offset that is from the beginning of
+the file, not a relative position from its last position.  It would be
+much better if that was the case, as well as it not being allowed to
+be negative.  That way, the "source" data stream would be able to be a
+stream and not a seekable file.
+
+This means two things;
+
+=over
+
+=item *
+
+The "source" filehandle in C<apply_fh()> B<must> permit seeking
+
+=item *
+
+Very large window sizes are not currently treated in a lazy fashion;
+each window is processed in a chunk.  This limitation is just a matter
+of getting more tuits to handle large chunk sizes properly, however.
+
+=back
 
 =cut
 
-sub new {
-    my $class = shift;
-    return bless([], $class);
-}
+our $schema = 
+    { fields => { transient => [ qw(fh) ],
+		  array => { windows =>
+			     { class => 'Parse::SVNDiff::Window' },
+			   },
+		  int => [ qw(lazy lazy_windows) ] },
+    };
 
 sub parse {
     my $self = shift;
@@ -52,162 +109,94 @@ sub parse {
     binmode($fh);
 
     local $/ = \4;
+    #exception not tested
     <$fh> eq "SVN\0" or die "Svndiff has invalid header";
 
-    @$self = ();
-    $self->parse_window($fh) until eof($fh);
+    $self->set_fh($fh);
+
+    unless ($self->lazy) {
+	1 while $self->get_window;
+    }
 
     return $self;
 }
 
+sub get_window {
+    my $self = shift;
+    my $fh   = $self->fh or die "self is :".YAML::Dump($self);
+    if (eof($fh)) {
+	$self->set_fh(undef);
+	return undef;
+    }
+    my $window = Parse::SVNDiff::Window->new( lazy => $self->lazy_windows );
+    if ( $window->parse($fh) ) {
+	$self->windows_push($window);
+	#push @{$self->{windows}||=[]}, $window;
+	return $window;
+    }
+}
+
+sub next_window {
+    my $self = shift;
+    if ( $self->lazy ) {
+	if ( $self->windows_size ) {
+	    return $self->windows_shift; #shift @{$self->{windows}};
+	} elsif ( $self->fh ) {
+	    $self->get_window unless $self->windows_size; #@{$self->{windows}||=[]};
+	    return $self->windows_shift;
+	}
+    }
+    else {
+	$self->{_cue} ||= 0;
+	return $self->windows($self->{_cue}++);
+    }
+}
+
 sub dump {
     my $self = shift;
-
-    "SVN\0" . join '', map {
-        my $inst_dump = $self->dump_instructions($_->{instructions});
-        pack('w w w w w',
-            @{$_}{qw( source_offset source_length target_length )},
-            length($inst_dump), length($_->{new_data}),
-        ),
-        $inst_dump, $_->{new_data},
-    } @$self;
-}
-
-sub dump_instructions {
-    my $self         = shift;
-    my $instructions = shift;
-    my $dump         = '';
-
-    foreach my $inst (@{$instructions}) {
-        if ($inst->{length} >= 0b01000000) {
-            $dump .= chr($inst->{selector} << 6) . pack('w', $inst->{length});
-        }
-        else {
-            $dump .= chr(($inst->{selector} << 6) + $inst->{length});
-        }
-
-        next if $inst->{selector} == SELECTOR_NEW;
-        $dump .= pack('w', $inst->{offset});
-    }
-
-    return $dump;
-}
-
-sub parse_window {
-    my $self = shift;
-    my $fh   = shift;
-
-    my $source_offset = $self->parse_ber($fh);
-    my $source_length = $self->parse_ber($fh);
-    my $target_length = $self->parse_ber($fh);
-
-    my $inst_length = $self->parse_ber($fh);
-    my $data_length = $self->parse_ber($fh);
-
-    my $instructions = $self->parse_instructions($fh, $inst_length);
-
-    local $/ = \$data_length;
-    my $new_data = <$fh>;
-
-    push @$self, {
-        source_offset => $source_offset,
-        source_length => $source_length,
-        target_length => $target_length,
-        new_data      => $new_data,
-        instructions  => $instructions,
-    };
-}
-
-sub parse_instructions {
-    my $self = shift;
-    my $fh   = shift;
-    my $len  = shift;
-    my @instructions;
-
-    my $pos = tell($fh);
-
-    local $/ = \1;
-    while (<$fh>) {
-        my $selector = ord($_) >> 6;
-        my $length   = (ord($_) % 0b01000000) || $self->parse_ber($fh);
-
-        push @instructions, { 
-            selector => $selector,
-            length   => $length,
-            offset   => (($selector == 0b10) ? 0 : $self->parse_ber($fh)),
-        };
-
-        last if (tell($fh) - $pos) >= $len;
-    }
-
-    return \@instructions;
-}
-
-sub parse_ber {
-    my $self = shift;
-    my $fh   = shift;
-    my $ber  = '';
-
-    local $/ = \1;
-    while (<$fh>) {
-        $ber .= $_;
-        ord($_) & 0b10000000 or last;
-    }
-
-    return unpack('w', $ber);
+    join '', "SVN\0", map { $_->dump } $self->windows;
 }
 
 sub apply {
     my $self   = shift;
+    my $source = shift;
     my $target = '';
+    open (my $source_fh, "<", \$source) or die $!;
+    open (my $target_fh, "+>", \$target) or die $!;
 
-    foreach my $window (@$self) {
-        my $data_offset   = 0;
-        my $target_offset = length($target);
-        my $source_offset = $window->{source_offset};
-        foreach my $inst (@{ $window->{instructions} }) {
-            if ($inst->{selector} == SELECTOR_SOURCE) {
-                $target .= substr(
-                    $_[0], ($source_offset + $inst->{offset}), $inst->{length}
-                );
-            }
-            elsif ($inst->{selector} == SELECTOR_TARGET) {
-                my $offset   = ($target_offset + $inst->{offset});
-                my $overflow = ($inst->{length} - (length($target) - $offset));
+    #kill 2, $$;
 
-                if ($overflow <= 0) {
-                    $target .= substr($target, $offset, $inst->{length});
-                }
-                else {
-                    my $chunk = 
-                    $target .= substr(
-                        substr($target, $offset) x (
-                            int($overflow / (length($target) - $offset)) + 1
-                        ), 0, $inst->{length}
-                    );
-                }
-            }
-            else {
-                $target .= substr(
-                    $window->{new_data},
-                    ($data_offset + $inst->{offset}),
-                    $inst->{length},
-                );
-                $data_offset += $inst->{length};
-            }
-        }
-    }
-
+    $self->apply_fh($source_fh, $target_fh);
     return $target;
+    #seek($target_fh, 0, 0);
+    #local($/);
+    #return <$target_fh>;
 }
 
-1;
+sub apply_fh {
+    my $self = shift;
+    my $source_fh = shift;
+    seek($source_fh, 0, 0) or die $!;
+    my $target_fh = shift;
+    seek($target_fh, 0, 0) or die $!;
+
+    while ( my $window = $self->next_window ) {
+	$window->apply_fh($source_fh, $target_fh);
+    }
+}
+
 
 =head1 AUTHORS
+
+Sam Vilain E<lt>samv@cpan.orgE<gt>
 
 Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>
 
 =head1 COPYRIGHT
+
+Copyright 2005, Sam Vilain.
+
+Original version
 
 Copyright 2004 by Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>.
 
