@@ -15,7 +15,6 @@ Makefile.PL
 MANIFEST			This list of files
 META.yml
 README
+SIGNATURE
 t/1-basic.t
 t/SVNDiffTests.pm
-SIGNATURE                                Public-key signature (added by MakeMaker)
-

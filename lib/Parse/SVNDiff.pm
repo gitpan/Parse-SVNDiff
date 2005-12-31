@@ -1,5 +1,5 @@
 package Parse::SVNDiff;
-$Parse::SVNDiff::VERSION = '0.03';
+$Parse::SVNDiff::VERSION = '0.04';
 
 use 5.008;
 
@@ -18,8 +18,8 @@ Parse::SVNDiff - Subversion binary diff format parser
 
 =head1 VERSION
 
-This document describes version 0.03 of Parse::SVNDiff, released
-July 24, 2005.
+This document describes version 0.04 of Parse::SVNDiff, released
+December 31, 2005.
 
 =head1 SYNOPSIS
 
@@ -188,17 +188,15 @@ sub apply_fh {
 
 =head1 AUTHORS
 
-Sam Vilain E<lt>samv@cpan.orgE<gt>
+Audrey Tang E<lt>autrijus@autrijus.orgE<gt>
 
-Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>
+Sam Vilain E<lt>samv@cpan.orgE<gt>
 
 =head1 COPYRIGHT
 
-Copyright 2005, Sam Vilain.
-
-Original version
-
-Copyright 2004 by Autrijus Tang E<lt>autrijus@autrijus.orgE<gt>.
+Copyright 2004, 2005 by
+Audrey Tang E<lt>autrijus@autrijus.orgE<gt>,
+Sam Vilain.
 
 This program is free software; you can redistribute it and/or modify it
 under the same terms as Perl itself.

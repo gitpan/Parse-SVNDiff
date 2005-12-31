@@ -1,12 +1,17 @@
-name: Parse-SVNDiff
-version: 0.02
 abstract: Subversion binary diff format parser
-author: Autrijus Tang <autrijus@autrijus.org>
-license: perl
+author: Audrey Tang <autrijus@autrijus.org>
+build_requires:
+  Test::Base: 0
 distribution_type: module
-requires:
-  perl: 5.8.0
+generated_by: Module::Install version 0.50
+license: perl
+name: Parse-SVNDiff
 no_index:
   directory:
     - inc
-generated_by: Module::Install version 0.36
+    - t
+requires:
+  Class::Tangram: 1.54
+  Data::Lazy: 0.06
+  perl: 5.8.0
+version: 0.04
